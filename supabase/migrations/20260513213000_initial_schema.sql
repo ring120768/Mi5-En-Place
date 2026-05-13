@@ -3,13 +3,13 @@
 -- Sites + applications + signals + opportunities
 -- =====================================================================
 
-create extension if not exists "uuid-ossp";
+-- gen_random_uuid() is built into Postgres 13+ — no extension needed
 
 -- =====================================================================
 -- SITES — one row per physical address
 -- =====================================================================
 create table public.sites (
-  id            uuid primary key default uuid_generate_v4(),
+  id            uuid primary key default gen_random_uuid(),
   postcode      text not null,
   address_line  text,
   borough       text not null default 'westminster',
@@ -26,7 +26,7 @@ create index sites_borough_idx  on public.sites(borough);
 -- APPLICATIONS — raw planning application metadata
 -- =====================================================================
 create table public.applications (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   site_id         uuid not null references public.sites(id) on delete restrict,
   source          text not null,        -- e.g. 'westminster_planning'
   planning_ref    text not null,        -- council application reference
@@ -76,7 +76,7 @@ create type signal_type as enum (
 );
 
 create table public.signals (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default gen_random_uuid(),
   application_id    uuid references public.applications(id) on delete restrict,
   tier              signal_tier not null,
   type              signal_type not null,
@@ -104,7 +104,7 @@ create type opportunity_state as enum (
 );
 
 create table public.opportunities (
-  id                  uuid primary key default uuid_generate_v4(),
+  id                  uuid primary key default gen_random_uuid(),
   site_id             uuid not null references public.sites(id) on delete restrict,
   opportunity_score   numeric(6, 2) not null default 0,
   state               opportunity_state not null default 'surveillance',
