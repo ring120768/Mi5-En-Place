@@ -18,6 +18,9 @@ interface ApplicationRow {
   status: string | null
   received_date: string | null
   source_url: string | null
+  applicant: string | null
+  agent: string | null
+  use_class: string | null
   signals: SignalRow[] | null
 }
 
@@ -66,6 +69,9 @@ export default async function HomePage() {
           status,
           received_date,
           source_url,
+          applicant,
+          agent,
+          use_class,
           signals (
             type,
             tier,
@@ -244,6 +250,25 @@ export default async function HomePage() {
                             <span className="text-zinc-600">·</span>
                             <span className="text-zinc-500">{a.received_date ?? '—'}</span>
                           </div>
+                          {(a.applicant || a.agent || a.use_class) && (
+                            <div className="mt-1 text-zinc-400 font-mono text-[11px] space-y-0.5">
+                              {a.applicant && (
+                                <div>
+                                  <span className="text-zinc-500">applicant:</span> {a.applicant}
+                                </div>
+                              )}
+                              {a.agent && (
+                                <div>
+                                  <span className="text-zinc-500">agent:</span> {a.agent}
+                                </div>
+                              )}
+                              {a.use_class && (
+                                <div>
+                                  <span className="text-zinc-500">use class:</span> {a.use_class}
+                                </div>
+                              )}
+                            </div>
+                          )}
                           {a.description && (
                             <p className="text-zinc-400 mt-1 leading-snug">
                               {a.description.slice(0, 280)}

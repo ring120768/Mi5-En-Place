@@ -203,6 +203,146 @@ function formatDateUK(d: Date): string {
   return `${dd}/${mm}/${yyyy}`
 }
 
+// ====================================================================
+// DETAIL PAGE SCRAPING — visit a specific application's detail page
+// and pull out applicant, agent, use class, etc.
+// ====================================================================
+
+export interface ScrapedDetail {
+  applicant: string | null
+  agent: string | null
+  use_class: string | null
+  application_type: string | null
+  case_officer: string | null
+  decision: string | null
+}
+
+/**
+ * Visit an IDOX application detail page and extract richer fields.
+ * Returns null if the page can't be parsed.
+ *
+ * IDOX detail pages have multiple tabs (summary, furtherInformation,
+ * contacts, dates). We visit each and accumulate fields.
+ */
+export async function scrapeWestminsterDetail(
+  detailUrl: string,
+  opts: { headless?: boolean } = {},
+): Promise<ScrapedDetail | null> {
+  const headless = opts.headless ?? true
+  const browser = await chromium.launch({ headless })
+  const context = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  })
+  const page = await context.newPage()
+
+  try {
+    const fieldMap: Record<string, string> = {}
+    const tabsToTry = ['summary', 'furtherInformation', 'contacts', 'dates']
+
+    for (const tab of tabsToTry) {
+      const tabUrl = /activeTab=\w+/.test(detailUrl)
+        ? detailUrl.replace(/activeTab=\w+/, `activeTab=${tab}`)
+        : `${detailUrl}${detailUrl.includes('?') ? '&' : '?'}activeTab=${tab}`
+
+      try {
+        await page.goto(tabUrl, {
+          waitUntil: 'domcontentloaded',
+          timeout: 30_000,
+        })
+      } catch (err) {
+        console.log(`[westminster] failed to load tab '${tab}': ${(err as Error).message}`)
+        continue
+      }
+
+      // Accumulate fields from this tab
+      const tabFields = await page.evaluate(() => {
+        const map: Record<string, string> = {}
+        // Generic: any table row with th + td, any dt/dd pair
+        document
+          .querySelectorAll(
+            '#applicationDetails table tr, #simpleDetailsTable tr, table tr',
+          )
+          .forEach((tr) => {
+            const th =
+              tr.querySelector('th')?.textContent?.replace(/\s+/g, ' ').trim() ??
+              ''
+            const td =
+              tr.querySelector('td')?.textContent?.replace(/\s+/g, ' ').trim() ??
+              ''
+            if (th && td) {
+              const key = th.toLowerCase().replace(/[:\s]+$/, '')
+              map[key] = td
+            }
+          })
+        document.querySelectorAll('dl dt').forEach((dt) => {
+          const label = dt.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+          const dd = dt.nextElementSibling
+          if (dd && dd.tagName === 'DD') {
+            const value = dd.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+            if (label && value) {
+              const key = label.toLowerCase().replace(/[:\s]+$/, '')
+              map[key] = value
+            }
+          }
+        })
+        return map
+      })
+
+      Object.assign(fieldMap, tabFields)
+    }
+
+    // If we got nothing, dump the last page's HTML so we can debug
+    if (Object.keys(fieldMap).length === 0) {
+      const html = await page.content()
+      const dumpPath = join(process.cwd(), 'debug-detail.html')
+      await writeFile(dumpPath, html, 'utf8')
+      const png = join(process.cwd(), 'debug-detail.png')
+      await page.screenshot({ path: png, fullPage: true }).catch(() => {})
+      console.log(`[westminster] DEBUG: saved ${dumpPath} (no fields found on any tab)`)
+    } else {
+      console.log(
+        `[westminster] detail keys found (${Object.keys(fieldMap).length}):`,
+      )
+      Object.entries(fieldMap).forEach(([k, v]) => {
+        console.log(`    "${k}" = "${v.slice(0, 80)}${v.length > 80 ? '…' : ''}"`)
+      })
+    }
+
+    // Look up the fields we want from the accumulated field map.
+    // Pure Node-side code — no page.evaluate, no __name helper risk.
+    const pickField = (keys: string[]): string | null => {
+      for (const k of keys) {
+        if (fieldMap[k] && fieldMap[k].trim() !== '') return fieldMap[k].trim()
+      }
+      return null
+    }
+
+    return {
+      applicant: pickField([
+        'applicant name',
+        'applicant',
+        'name of applicant',
+      ]),
+      agent: pickField(['agent name', 'agent', 'name of agent']),
+      use_class: pickField([
+        'existing use class',
+        'proposed use class',
+        'use class',
+      ]),
+      application_type: pickField(['application type', 'application']),
+      case_officer: pickField(['case officer', 'officer']),
+      decision: pickField(['decision', 'decision issued']),
+    }
+  } catch (err) {
+    console.error(`[westminster] detail scrape failed for ${detailUrl}:`, err)
+    return null
+  } finally {
+    await browser.close()
+  }
+}
+
 async function dismissCookieBanner(page: Page): Promise<void> {
   // Common cookie banner patterns
   const candidates = [
